@@ -280,7 +280,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Gera Excel com IM por Unidade e IFES.")
     parser.add_argument("--questionario", required=True, type=Path, help="Caminho para questionario.xlsx")
     parser.add_argument("--respostas", required=True, type=Path, help="Caminho para respostas.xlsx")
-    parser.add_argument("--saida", required=True, type=Path, help="Caminho para o Excel de saída (ex.: im_looker.xlsx)")
+    parser.add_argument("--saida", required=True, type=Path, help="Caminho para o Excel de saída (ex.: im_resultado.xlsx)")
     parser.add_argument("--ifes-col", dest="ifes_col", default=PERGUNTA_IFES_PADRAO, help="Texto da pergunta que identifica a IFES")
     parser.add_argument("--unidade-col", dest="unidade_col", default=PERGUNTA_UNIDADE_PADRAO, help="Texto da pergunta que identifica a Unidade da IFES")
 
