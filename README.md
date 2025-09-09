@@ -11,11 +11,11 @@ Regras implementadas:
 - Pontuação da Dimensão na IFES: média das unidades da IFES para aquela dimensão
 - IM da IFES: média aritmética das dimensões da IFES (todas com mesmo peso)
 - Classificação por faixas:
-    0.00–0.19 Incipiente
-    0.20–0.39 Em planejamento
-    0.40–0.59 Em implantação
-    0.60–0.79 Implementado, porém otimizável
-    0.80–1.00 Excelência
+    - 0.00–0.19 Incipiente
+    - 0.20–0.39 Em planejamento
+    - 0.40–0.59 Em implantação
+    - 0.60–0.79 Implementado, porém otimizável
+    - 0.80–1.00 Excelência
 
 Saída:
 - Excel com 5 abas: dados, consolidacao_dimensao_unidade, consolidacao_dimensao_ifes, consolidacao_ifes, dados agregados
