@@ -1,9 +1,9 @@
 # IM-IFES
 Gera um Excel consolidado (4 abas) a partir de:
-- questionario.xlsx (estrutura: ID | Pergunta | Área responsável | Dimensão)
+- questionario.xlsx (estrutura: ID | Pergunta | Dimensão)
 - respostas.xlsx (respostas brutas do Google Forms)
 
-Regras implementadas (conforme calculo.tex):
+Regras implementadas:
 - Fatores: 4->1.00, 3->0.75, 2->0.50, 1->0.25, 0->0.00, NA->ignorado
 - Peso por pergunta válida (não-NA) dentro de uma dimensão e por resposta: Peso = 1/n_válidas
 - Pontuação da pergunta = Fator * Peso
@@ -18,7 +18,7 @@ Regras implementadas (conforme calculo.tex):
     0.80–1.00 Excelência
 
 Saída:
-- Excel com 4 abas: dados, consolidacao_dimensao_unidade, consolidacao_dimensao_ifes, consolidacao_ifes
+- Excel com 5 abas: dados, consolidacao_dimensao_unidade, consolidacao_dimensao_ifes, consolidacao_ifes, dados agregados
 
 Uso (exemplos)
     python im_calc.py \
