@@ -34,7 +34,6 @@ def classificar(pontuacao: float) -> str:
     pontuacao = float(pontuacao)
     if pontuacao < 0.0 or pontuacao > 1.0:
         raise ValueError(f"Pontuação fora do intervalo [0,1]: {pontuacao}. Verifique os dados de entrada.")
-    # Arredondar para 2 casas ANTES de classificar
     pontuacao = round(pontuacao, 2)
     for i, (a, b, label) in enumerate(FAIXAS_CLASSIFICACAO):
         if i < len(FAIXAS_CLASSIFICACAO) - 1:
@@ -46,11 +45,7 @@ def classificar(pontuacao: float) -> str:
     return np.nan
 
 def parse_fator(val):
-    """Converte a resposta em "fator" e "valida"
-    - 'NA' e variantes -> (nan, False)
-    - '4 - ...' etc -> pega o primeiro dígito [0-4] e mapeia via MAPA_FATOR
-    - vazio/NaN -> (nan, False)
-    """
+    """Converte a resposta em 'fator' e 'valida'."""
     if pd.isna(val):
         return np.nan, False
     s = str(val).strip().upper()
@@ -68,10 +63,9 @@ def parse_fator(val):
 
 
 def normalizar_coluna_area_responsavel(df: pd.DataFrame) -> pd.DataFrame:
-    """Normaliza nome da coluna 'Área responsável' (remove espaços, acentos já vêm prontos)"""
+    """Normaliza nome da coluna 'Área responsável'."""
     cols = {c: c.strip() for c in df.columns}
     df = df.rename(columns=cols)
-    # Unificar se vier com espaços estranhos ou variações
     for c in list(df.columns):
         if c.strip().lower() in ("área responsável", "area responsável", "área responsavel", "area responsavel"):
             if c != "Área responsável":
@@ -90,15 +84,70 @@ def gerar_uid(row: pd.Series, ifes_col: str, unidade_col: str) -> str:
     return f"RSP-{h}"
 
 
+# helpers (CSV/Excel) 
+CANDIDATE_DELIMS = [",", ";", "\t", "|"]
+
+def _detect_delimiter(path: Path, sample_lines: int = 5) -> str:
+    """Escolhe o delimitador mais frequente entre vírgula, ponto-e-vírgula, tab e pipe."""
+    try:
+        counts = {d: 0 for d in CANDIDATE_DELIMS}
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            for i, line in enumerate(f):
+                if i >= sample_lines:
+                    break
+                for d in CANDIDATE_DELIMS:
+                    counts[d] += line.count(d)
+        best = max(counts, key=counts.get)
+        return best if counts[best] > 0 else ","
+    except Exception:
+        return ","
+
+
+def carregar_tabela(path: Path, *, encoding: str = "utf-8", delimiter: str = None, sheet: str | int | None = None, label: str = "") -> pd.DataFrame:
+    """Carrega CSV (.csv/.txt) ou Excel (.xlsx/.xls). Se CSV, detecta delimitador quando não informado."""
+    suf = path.suffix.lower()
+    if suf in {".csv", ".txt"}:
+        sep = delimiter if delimiter else _detect_delimiter(path)
+        try:
+            return pd.read_csv(path, encoding=encoding, sep=sep, engine="python")
+        except Exception as e:
+            raise ValueError(f"Falha ao ler {label or path.name} como CSV (sep='{sep}'): {e}")
+    elif suf in {".xlsx", ".xls"}:
+        try:
+            return pd.read_excel(path, sheet_name=sheet if sheet is not None else 0)
+        except Exception as e:
+            raise ValueError(f"Falha ao ler {label or path.name} como Excel: {e}")
+    else:
+        raise ValueError(f"Formato não suportado para {label or path.name}: '{suf}'. Use .xlsx/.xls ou .csv/.txt")
+
+
 def main(questionario_path: Path,
          respostas_path: Path,
          saida_path: Path,
          ifes_question: str = PERGUNTA_IFES_PADRAO,
-         unidade_question: str = PERGUNTA_UNIDADE_PADRAO) -> None:
+         unidade_question: str = PERGUNTA_UNIDADE_PADRAO,
+         questionario_encoding: str = "utf-8",
+         respostas_encoding: str = "utf-8",
+         questionario_delim: str | None = None,
+         respostas_delim: str | None = None,
+         questionario_sheet: str | int | None = None,
+         respostas_sheet: str | int | None = None) -> None:
     # Leitura
-    q_df = pd.read_excel(questionario_path, sheet_name=0)
+    q_df = carregar_tabela(
+        questionario_path,
+        encoding=questionario_encoding,
+        delimiter=questionario_delim,
+        sheet=questionario_sheet,
+        label="questionário"
+    )
     q_df = normalizar_coluna_area_responsavel(q_df)
-    r_df = pd.read_excel(respostas_path, sheet_name=0)
+    r_df = carregar_tabela(
+        respostas_path,
+        encoding=respostas_encoding,
+        delimiter=respostas_delim,
+        sheet=respostas_sheet,
+        label="respostas"
+    )
 
     # Metadados: colunas das respostas que NÃO são perguntas do questionário
     q_df["Pergunta"] = q_df["Pergunta"].astype(str).str.strip()
@@ -205,12 +254,7 @@ def main(questionario_path: Path,
             dados_long[c] = np.nan
     dados_final = dados_long[dados_cols].copy() 
 
-    
-    # ABA 'dados agregados': left join:
-    # Base: dados_final
-    # Join 1: consolidacao_dimensao_unidade (chaves: IFES, Unidade, ifes_unidade, Dimensão)
-    # Join 2: consolidacao_dimensao_ifes (chaves: IFES, Dimensão)
-    # Join 3: consolidacao_ifes (chaves: IFES)
+    # 'dados agregados': left join com consolidações
     colunas_unidade = [
         "IFES","Unidade","ifes_unidade","Dimensão",
         "Pontuação IM da Dimensão na ifes_unidade",
@@ -235,7 +279,6 @@ def main(questionario_path: Path,
             .merge(consolidacao_ifes[colunas_ifes], how="left",
                    on=["IFES"])
     )
-    
 
     # Gravar Excel
     saida_path = Path(saida_path)
@@ -258,12 +301,10 @@ def main(questionario_path: Path,
             "IFES", "Pontuação IM na IFES", "Classificação IM na IFES"
         ]].to_excel(writer, index=False, sheet_name="consolidacao_ifes")
 
-    
         dados_agregados.to_excel(writer, index=False, sheet_name="dados agregados")
     print(f"[OK] Arquivo gerado: {saida_path}")
     print(f"[INFO] IFES_QUESTION = {ifes_question}")
     print(f"[INFO] UNIDADE_QUESTION = {unidade_question}")
-    # Imprimir em tela as perguntas consideradas metadados
     try:
         metas_list = list(meta_cols)
         print("[META] Campos de metadados detectados (não entram no cálculo):")
@@ -277,12 +318,20 @@ def main(questionario_path: Path,
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Gera Excel com IM por Unidade e IFES.")
-    parser.add_argument("--questionario", required=True, type=Path, help="Caminho para questionario.xlsx")
-    parser.add_argument("--respostas", required=True, type=Path, help="Caminho para respostas.xlsx")
+    parser = argparse.ArgumentParser(description="Gera Excel com IM por Unidade e IFES (aceita .xlsx/.xls e .csv/.txt).")
+    parser.add_argument("--questionario", required=True, type=Path, help="Caminho para questionario (.xlsx/.xls/.csv)")
+    parser.add_argument("--respostas", required=True, type=Path, help="Caminho para respostas (.xlsx/.xls/.csv)")
     parser.add_argument("--saida", required=True, type=Path, help="Caminho para o Excel de saída (ex.: im_resultado.xlsx)")
     parser.add_argument("--ifes-col", dest="ifes_col", default=PERGUNTA_IFES_PADRAO, help="Texto da pergunta que identifica a IFES")
     parser.add_argument("--unidade-col", dest="unidade_col", default=PERGUNTA_UNIDADE_PADRAO, help="Texto da pergunta que identifica a Unidade da IFES")
+
+    # Opções de leitura (CSV/Excel)
+    parser.add_argument("--questionario-encoding", default="utf-8", help="Encoding do questionário (CSV)")
+    parser.add_argument("--respostas-encoding", default="utf-8", help="Encoding das respostas (CSV)")
+    parser.add_argument("--questionario-delim", default=None, help="Delimitador do questionário (CSV). Se omitido, detecta automaticamente (, ; \\t |)")
+    parser.add_argument("--respostas-delim", default=None, help="Delimitador das respostas (CSV). Se omitido, detecta automaticamente (, ; \\t |)")
+    parser.add_argument("--questionario-sheet", default=None, help="Nome/índice da planilha do questionário (Excel). Padrão: 0")
+    parser.add_argument("--respostas-sheet", default=None, help="Nome/índice da planilha das respostas (Excel). Padrão: 0")
 
     args = parser.parse_args()
 
@@ -293,6 +342,12 @@ if __name__ == "__main__":
             saida_path=args.saida,
             ifes_question=args.ifes_col,
             unidade_question=args.unidade_col,
+            questionario_encoding=args.questionario_encoding,
+            respostas_encoding=args.respostas_encoding,
+            questionario_delim=args.questionario_delim,
+            respostas_delim=args.respostas_delim,
+            questionario_sheet=args.questionario_sheet,
+            respostas_sheet=args.respostas_sheet,
         )
     except Exception as e:
         print("[ERRO]", e, file=sys.stderr)
