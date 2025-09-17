@@ -1,3 +1,4 @@
+
 import argparse 
 import sys
 from hashlib import md5
@@ -70,13 +71,17 @@ def interpretar_fator(valor):
 
 
 def normalizar_nome_coluna_area_responsavel(df: pd.DataFrame) -> pd.DataFrame:
-    """Normaliza o nome da coluna 'Área responsável' para exatamente esse texto."""
+    """Normaliza o nome da coluna 'Área responsável' para exatamente esse texto e cria caso não exista."""
     cols = {c: c.strip() for c in df.columns}
     df = df.rename(columns=cols)
+    achou = False
     for c in list(df.columns):
         if c.strip().lower() in ("área responsável", "area responsável", "área responsavel", "area responsavel"):
             if c != "Área responsável":
                 df = df.rename(columns={c: "Área responsável"})
+            achou = True
+    if not achou and "Área responsável" not in df.columns:
+        df["Área responsável"] = np.nan
     return df
 
 
@@ -198,6 +203,7 @@ def montar_tabela_txt(cabecalhos: list[str], linhas: list[list[str]], alinhament
     return out
 
 # ======================= RELATORIOS TXT =======================
+
 def gerar_relatorios_txt(
     caminho_saida: Path,
     dados_longos: pd.DataFrame,
@@ -206,20 +212,19 @@ def gerar_relatorios_txt(
     consolidacao_ifes: pd.DataFrame,
 ):
     """
-    Gera relatorios TXT por IFES e por ifes_unidade.
-    Regras aplicadas:
-      - '< mediana' e '>= Q3'
-      - Desvio-padrao amostral (ddof=1)
-      - No inicio de CADA TXT eh exibido o IM (media do IM das dimensoes).
+    Gera relatórios TXT por IFES e por ifes_unidade.
+    Regras aplicadas (APENAS MÉDIAS):
+      - Comparações por IFES e Dimensão usam **média** como limiar (ex.: "< média" e ">= média").
+      - Desvio-padrão amostral (ddof=1).
+      - Tabelas mostram apenas: Mínimo, Máximo, Desvio-padrão e Média.
     """
     dir_base = Path(caminho_saida).parent / (Path(caminho_saida).stem + "_txt")
     dir_ifes = dir_base / "IFES"
     dir_unidades = dir_base / "unidades"
 
-    # Bases auxiliares
     dados_validos = dados_longos.loc[dados_longos["Valida"] == True].copy()
 
-    # IM por unidade (media das dimensoes da unidade)
+    # IM por unidade (média das dimensões da unidade)
     im_por_unidade = (
         consolidacao_dimensao_unidade
         .groupby(["IFES", "Unidade", "ifes_unidade"], dropna=False)["Pontuação IM da Dimensão na ifes_unidade"]
@@ -227,48 +232,43 @@ def gerar_relatorios_txt(
         .reset_index(name="IM da ifes_unidade")
     )
 
-    # Limiar mediana e Q3 do IM das unidades por IFES
+    # Limiar: média do IM das unidades por IFES
     limiares_im_ifes = (
         im_por_unidade.groupby("IFES", dropna=False)["IM da ifes_unidade"]
-        .agg(mediana="median", q3=lambda s: s.quantile(0.75))
+        .agg(media="mean")
         .reset_index()
     )
 
-    # Mediana por dimensao dentro da IFES (entre unidades) — para relatorio da unidade (2A)
-    mediana_dimensao_por_ifes = (
+    # (Entre unidades) média por dimensão na IFES — para relatórios IFES/unidade
+    media_dimensao_por_ifes = (
         consolidacao_dimensao_unidade
         .groupby(["IFES","Dimensão"], dropna=False)["Pontuação IM da Dimensão na ifes_unidade"]
-        .median()
-        .reset_index(name="Mediana_dim_IFES")
+        .mean()
+        .reset_index(name="Media_dim_IFES")
     )
 
-    # Media por dimensao na IFES (ja vem da consolidacao por IFES) — para relatorio da unidade (2B)
-    media_dimensao_por_ifes = consolidacao_dimensao_ifes.rename(columns={
-        "Pontuação IM da Dimensão na IFES": "Media_dim_IFES"
-    })[["IFES","Dimensão","Media_dim_IFES"]]
-
-    # Baseline de respostas por dimensao na IFES (para perguntas) — mediana e Q3
+    # Baseline de respostas por dimensão (na IFES): apenas média
     base_dimensao_respostas = (
         dados_validos
         .groupby(["IFES","Dimensão"], dropna=False)["Fator"]
-        .agg(dim_mediana="median", dim_q3=lambda s: s.quantile(0.75))
+        .agg(dim_media="mean")
         .reset_index()
     )
 
-    # Mediana das respostas por PERGUNTA dentro da IFES
-    mediana_pergunta_por_ifes = (
+    # Média das respostas por PERGUNTA dentro da IFES
+    media_pergunta_por_ifes = (
         dados_validos
         .groupby(["IFES","Dimensão","Pergunta"], dropna=False)["Fator"]
-        .median()
-        .reset_index(name="mediana_pergunta")
+        .mean()
+        .reset_index(name="media_pergunta")
     )
 
-    # ------------------- Relatorios por IFES -------------------
+    # ------------------- Relatórios por IFES -------------------
     for ifes, df_ifes in consolidacao_dimensao_unidade.groupby("IFES", dropna=False):
         ifes_rotulo = str(ifes) if pd.notna(ifes) else "(Sem IFES)"
         ifes_slug = gerar_slug(ifes_rotulo)
 
-        # IM da IFES: media do IM das dimensoes
+        # IM da IFES: média do IM das dimensões
         linha_ifes = consolidacao_ifes.loc[consolidacao_ifes["IFES"] == ifes]
         if len(linha_ifes):
             im_da_ifes = linha_ifes["Pontuação IM na IFES"].iloc[0]
@@ -280,70 +280,92 @@ def gerar_relatorios_txt(
         linhas = []
         linhas.append(f"Relatório IM – IFES: {ifes_rotulo}")
         linhas.append(f"IM da IFES (média das dimensões): {fmt_num(im_da_ifes)}")
-        linhas.append("Obs.: Desvio-padrão amostral (ddof=1). Regras: '< mediana' e '>= Q3'.")
+        linhas.append("Obs.: Desvio-padrão amostral (ddof=1). Regras: '< média' e '>= média'.")
         linhas.append("")
-        
-        # A.1) Tabela de análise por IFES (IM por unidade)
+
+        # A.1) Tabela de análise por IFES (IM por unidade) — estatísticas simples com média
         linhas.append("A.1) Tabela de análise por IFES (IM por unidade)")
-        cab = ["Dimensão","Min","Q1","Mediana","Q3","Máximo","Desvio-padrão","Média","IQR"]
+        cab = ["Métrica","Mínimo","Máximo","Desvio-padrão","Média","Q1 (25%)","Mediana (50%)","Q3 (75%)","IQR (Q3-Q1)"]
 
-        # IM das unidades desta IFES
         s2 = im_por_unidade.loc[im_por_unidade["IFES"] == ifes, "IM da ifes_unidade"].dropna()
-
         if len(s2) == 0:
             stats = ["—"] * 8
         else:
             minimo  = s2.min()
-            q1      = quantil(s2, 0.25)
-            mediana = s2.median()
-            q3      = quantil(s2, 0.75)
             maximo  = s2.max()
             desvio  = s2.std(ddof=1)
             media   = s2.mean()
-            iqr     = q3 - q1 if pd.notna(q3) and pd.notna(q1) else np.nan
-            stats   = [fmt_num(minimo), fmt_num(q1), fmt_num(mediana), fmt_num(q3),
-                       fmt_num(maximo), fmt_num(desvio), fmt_num(media), fmt_num(iqr)]
-
+            q1      = s2.quantile(0.25)
+            med     = s2.quantile(0.50)
+            q3      = s2.quantile(0.75)
+            iqr     = q3 - q1
+            stats   = [fmt_num(minimo), fmt_num(maximo), fmt_num(desvio), fmt_num(media), fmt_num(q1), fmt_num(med), fmt_num(q3), fmt_num(iqr)]
         linhas_tabela = [["IM (por unidade)"] + stats]
         for l in montar_tabela_txt(cab, linhas_tabela, alinhamento=["left"] + ["right"] * (len(cab)-1)):
             linhas.append(l)
         linhas.append("")
 
-        # A.2) Tabela de análise de dimensão por IFES (ASCII alinhado)
+        # A.2) Tabela de análise de dimensão por IFES — estatísticas com média
         linhas.append("A.2) Tabela de análise de dimensão por IFES")
-        cab = ["Dimensão","Min","Q1","Mediana","Q3","Máximo","Desvio-padrão","Média","IQR"]
+        cab = ["Dimensão","Mínimo","Máximo","Desvio-padrão","Média","Δ p/ IM da IFES","Q1 (25%)","Mediana (50%)","Q3 (75%)","IQR (Q3-Q1)"]
         linhas_tabela = []
         for dimensao, df_dim in df_ifes.groupby("Dimensão", dropna=False):
             rotulo_dim = str(dimensao) if pd.notna(dimensao) else "(Sem dimensão)"
             s = df_dim["Pontuação IM da Dimensão na ifes_unidade"].dropna()
             if len(s) == 0:
-                stats = ["—"]*8
+                stats = ["—"]*9
             else:
                 minimo = s.min()
-                q1 = quantil(s, 0.25)
-                mediana = s.median()
-                q3 = quantil(s, 0.75)
                 maximo = s.max()
                 desvio = s.std(ddof=1)
-                media = s.mean()
-                iqr = q3 - q1 if pd.notna(q3) and pd.notna(q1) else np.nan
-                stats = [fmt_num(minimo), fmt_num(q1), fmt_num(mediana), fmt_num(q3),
-                         fmt_num(maximo), fmt_num(desvio), fmt_num(media), fmt_num(iqr)]
+                media  = s.mean()
+                delta  = media - im_da_ifes
+                q1     = s.quantile(0.25)
+                med    = s.quantile(0.50)
+                q3     = s.quantile(0.75)
+                iqr    = q3 - q1
+                stats  = [fmt_num(minimo), fmt_num(maximo), fmt_num(desvio), fmt_num(media), fmt_num(delta), fmt_num(q1), fmt_num(med), fmt_num(q3), fmt_num(iqr)]
             linhas_tabela.append([rotulo_dim] + stats)
         for l in montar_tabela_txt(cab, linhas_tabela, alinhamento=["left"] + ["right"]*(len(cab)-1)):
             linhas.append(l)
         linhas.append("")
 
-       
-
-        # Preparacao para B/C
+        # Limiar por IFES (média do IM das unidades)
         im_da_ifes_unidades = im_por_unidade.loc[im_por_unidade["IFES"] == ifes].copy()
         limiares = limiares_im_ifes.loc[limiares_im_ifes["IFES"] == ifes]
-        med_im = limiares["mediana"].iloc[0] if len(limiares) else np.nan
-        q3_im = limiares["q3"].iloc[0] if len(limiares) else np.nan
+        mean_im = limiares["media"].iloc[0] if len(limiares) else np.nan
 
-        # A.4 Tabela — IM por unidade (média das dimensões por unidade)
-        linhas.append("A.4Tabela — IM por unidade")
+        # Média por dimensão (entre unidades) nesta IFES
+        dim_mean_tbl = media_dimensao_por_ifes.loc[media_dimensao_por_ifes["IFES"] == ifes][["Dimensão","Media_dim_IFES"]]
+
+        # A.3A
+        linhas.append("A.3A Dimensões com média do IM menor que a média do IM da IFES")
+        if pd.isna(mean_im) or dim_mean_tbl.empty:
+            linhas.append(" - (sem média calculada)")
+        else:
+            sub = dim_mean_tbl.loc[dim_mean_tbl["Media_dim_IFES"] < mean_im].sort_values("Media_dim_IFES")
+            if sub.empty:
+                linhas.append(" - (nenhuma)")
+            else:
+                for _, rr in sub.iterrows():
+                    linhas.append(f" - {rr['Dimensão']}: {fmt_num(rr['Media_dim_IFES'])} (limiar {fmt_num(mean_im)})")
+        linhas.append("")
+
+        # A.3B
+        linhas.append('A.3B "Dimensões referência": Dimensões com média do IM >= média do IM da IFES')
+        if pd.isna(mean_im) or dim_mean_tbl.empty:
+            linhas.append(" - (sem média calculada)")
+        else:
+            sub = dim_mean_tbl.loc[dim_mean_tbl["Media_dim_IFES"] >= mean_im].sort_values("Media_dim_IFES", ascending=False)
+            if sub.empty:
+                linhas.append(" - (nenhuma)")
+            else:
+                for _, rr in sub.iterrows():
+                    linhas.append(f" - {rr['Dimensão']}: {fmt_num(rr['Media_dim_IFES'])} (limiar {fmt_num(mean_im)})")
+        linhas.append("")
+
+        # A.3 Tabela — IM por unidade (média das dimensões por unidade)
+        linhas.append("A.3 Tabela — IM por unidade")
         cab = ["Unidade","IM da unidade"]
         try:
             tab = (
@@ -360,12 +382,12 @@ def gerar_relatorios_txt(
             linhas.append(l)
         linhas.append("")
 
-        # B) unidades com IM < mediana da IFES
-        linhas.append("B) Unidades com IM abaixo da mediana da IFES")
-        if pd.isna(med_im):
-            linhas.append(" - (sem mediana calculada)")
+        # B) Unidades com IM < média da IFES
+        linhas.append("B) Unidades com IM abaixo da média da IFES")
+        if pd.isna(mean_im):
+            linhas.append(" - (sem média calculada)")
         else:
-            sub = im_da_ifes_unidades.loc[im_da_ifes_unidades["IM da ifes_unidade"] < med_im].sort_values("IM da ifes_unidade")
+            sub = im_da_ifes_unidades.loc[im_da_ifes_unidades["IM da ifes_unidade"] < mean_im].sort_values("IM da ifes_unidade")
             if sub.empty:
                 linhas.append(" - (nenhuma)")
             else:
@@ -373,12 +395,12 @@ def gerar_relatorios_txt(
                     linhas.append(f" - {r['ifes_unidade']} = {fmt_num(r['IM da ifes_unidade'])}")
         linhas.append("")
 
-        # C) Unidades Referencia: IM >= Q3
-        linhas.append('C) "Unidades Referência": IM >= Q3 da IFES')
-        if pd.isna(q3_im):
-            linhas.append(" - (sem Q3 calculado)")
+        # C) Unidades Referência: IM >= média
+        linhas.append('C) "Unidades Referência": IM >= média da IFES')
+        if pd.isna(mean_im):
+            linhas.append(" - (sem média calculada)")
         else:
-            sub = im_da_ifes_unidades.loc[im_da_ifes_unidades["IM da ifes_unidade"] >= q3_im].sort_values("IM da ifes_unidade", ascending=False)
+            sub = im_da_ifes_unidades.loc[im_da_ifes_unidades["IM da ifes_unidade"] >= mean_im].sort_values("IM da ifes_unidade", ascending=False)
             if sub.empty:
                 linhas.append(" - (nenhuma)")
             else:
@@ -386,46 +408,49 @@ def gerar_relatorios_txt(
                     linhas.append(f" - {r['ifes_unidade']} = {fmt_num(r['IM da ifes_unidade'])}")
         linhas.append("")
 
-        # D/E) Perguntas vs baseline da dimensao (na IFES) — usando Fator (respostas)
-        base_dim = base_dimensao_respostas.loc[base_dimensao_respostas["IFES"] == ifes].copy()
-        perg_med = mediana_pergunta_por_ifes.loc[mediana_pergunta_por_ifes["IFES"] == ifes].copy()
-        perg_med = perg_med.merge(base_dim, on=["IFES","Dimensão"], how="left")
+        # D/E) Perguntas vs baseline da dimensão (na IFES) — baseline = MÉDIA DA DIMENSÃO DA IFES (IM da Dimensão)
+        base_dim_ifes_media = (
+            consolidacao_dimensao_ifes.loc[consolidacao_dimensao_ifes["IFES"] == ifes, ["IFES","Dimensão","Pontuação IM da Dimensão na IFES"]]
+            .rename(columns={"Pontuação IM da Dimensão na IFES": "Media_dim_IFES"})
+        )
+        perg_mean = media_pergunta_por_ifes.loc[media_pergunta_por_ifes["IFES"] == ifes].copy()
+        perg_mean = perg_mean.merge(base_dim_ifes_media, on=["IFES","Dimensão"], how="left")
 
-        # D) mediana_pergunta < mediana da dimensao
-        linhas.append("D) Perguntas por dimensão com mediana < mediana das respostas da Dimensão (independente da unidade)")
-        if perg_med.empty:
+        # D) media_pergunta < média da Dimensão da IFES
+        linhas.append("D) Perguntas por dimensão com média < média da Dimensão da IFES")
+        if perg_mean.empty:
             linhas.append(" - (sem dados)")
         else:
-            for dimensao, df_dim in perg_med.groupby("Dimensão", dropna=False):
+            for dimensao, df_dim in perg_mean.groupby("Dimensão", dropna=False):
                 rotulo_dim = str(dimensao) if pd.notna(dimensao) else "(Sem dimensão)"
-                base_md = df_dim["dim_mediana"].iloc[0]
-                subset = df_dim.loc[df_dim["mediana_pergunta"] < base_md].sort_values("mediana_pergunta")
+                base_md = df_dim["Media_dim_IFES"].iloc[0]
+                subset = df_dim.loc[df_dim["media_pergunta"] < base_md].sort_values("media_pergunta")
                 if subset.empty:
                     continue
                 linhas.append(f" - {rotulo_dim}:")
-                for _, r in subset.iterrows():
-                    linhas.append(f"    • {r['Pergunta']} = {fmt_num(r['mediana_pergunta'])} (limiar {fmt_num(base_md)})")
+                for _, rrr in subset.iterrows():
+                    linhas.append(f"    • {rrr['Pergunta']} = {fmt_num(rrr['media_pergunta'])} (limiar {fmt_num(base_md)})")
         linhas.append("")
 
-        # E) mediana_pergunta >= Q3 da dimensao
-        linhas.append('E) "Perguntas Referência": perguntas com mediana >= Q3 das respostas da Dimensão (independente da unidade)')
-        if perg_med.empty:
+        # E) media_pergunta >= média da Dimensão da IFES
+        linhas.append('E) "Perguntas Referência": perguntas com média >= média da Dimensão da IFES')
+        if perg_mean.empty:
             linhas.append(" - (sem dados)")
         else:
-            for dimensao, df_dim in perg_med.groupby("Dimensão", dropna=False):
+            for dimensao, df_dim in perg_mean.groupby("Dimensão", dropna=False):
                 rotulo_dim = str(dimensao) if pd.notna(dimensao) else "(Sem dimensão)"
-                base_q3 = df_dim["dim_q3"].iloc[0]
-                subset = df_dim.loc[df_dim["mediana_pergunta"] >= base_q3].sort_values("mediana_pergunta", ascending=False)
+                base_md = df_dim["Media_dim_IFES"].iloc[0]
+                subset = df_dim.loc[df_dim["media_pergunta"] >= base_md].sort_values("media_pergunta", ascending=False)
                 if subset.empty:
                     continue
                 linhas.append(f" - {rotulo_dim}:")
-                for _, r in subset.iterrows():
-                    linhas.append(f"    • {r['Pergunta']} = {fmt_num(r['mediana_pergunta'])} (limiar {fmt_num(base_q3)})")
+                for _, rrr in subset.iterrows():
+                    linhas.append(f"    • {rrr['Pergunta']} = {fmt_num(rrr['media_pergunta'])} (limiar {fmt_num(base_md)})")
         linhas.append("")
 
         escrever_txt(dir_ifes / f"IFES_{ifes_slug}.txt", linhas)
 
-    # ------------------- Relatorios por ifes_unidade -------------------
+    # ------------------- Relatórios por ifes_unidade -------------------
     for _, r in im_por_unidade.iterrows():
         ifes = r["IFES"]
         unidade = r["Unidade"]
@@ -438,10 +463,61 @@ def gerar_relatorios_txt(
         linhas = []
         linhas.append(f"Relatório IM – Unidade: {ifes_unid}")
         linhas.append(f"IM da unidade (média das dimensões): {fmt_num(r['IM da ifes_unidade'])}")
-        linhas.append("Obs.: Desvio-padrão amostral (ddof=1). Regras: '< mediana' e '>= Q3'.")
+        linhas.append("Obs.: Desvio-padrão amostral (ddof=1). Regras: '< média' e '>= média'.")
         linhas.append("")
 
-        # A/B usam IM por dimensao da unidade
+        # A.2) Tabela de análise de dimensão por IFES_UNIDADE
+        linhas.append("A.2) Tabela de análise de dimensão por IFES_UNIDADE")
+
+        # Base da unidade: IM por dimensão + classificação
+        dim_unid_tab = (
+            consolidacao_dimensao_unidade
+            .loc[
+                (consolidacao_dimensao_unidade["IFES"] == ifes) &
+                (consolidacao_dimensao_unidade["Unidade"] == unidade)
+            ][["Dimensão",
+               "Pontuação IM da Dimensão na ifes_unidade",
+               "Classificação IM da dimensão na ifes_unidade"]]
+            .rename(columns={
+                "Pontuação IM da Dimensão na ifes_unidade": "IM_dim_unidade",
+                "Classificação IM da dimensão na ifes_unidade": "Classif"
+            })
+        )
+
+        # Baselines na IFES: **média** por dimensão
+        base_mean_dim2 = media_dimensao_por_ifes.loc[
+            media_dimensao_por_ifes["IFES"] == ifes, ["Dimensão", "Media_dim_IFES"]
+        ]
+
+        # Junta e calcula delta p/ média
+        dim_unid_tab = (
+            dim_unid_tab
+            .merge(base_mean_dim2, on="Dimensão", how="left")
+        )
+        dim_unid_tab["delta_mean"] = dim_unid_tab["IM_dim_unidade"] - dim_unid_tab["Media_dim_IFES"]
+
+        # Monta tabela ASCII alinhada
+        cab = ["Dimensão", "IM da unidade", "Média (IFES)",
+               "Δ p/ média", "Classificação"]
+        linhas_tabela = [
+            [
+                str(row["Dimensão"]) if pd.notna(row["Dimensão"]) else "(Sem dimensão)",
+                fmt_num(row["IM_dim_unidade"]),
+                fmt_num(row["Media_dim_IFES"]),
+                fmt_num(row["delta_mean"]),
+                row.get("Classif", "—"),
+            ]
+            for _, row in dim_unid_tab.sort_values("Dimensão", na_position="last").iterrows()
+        ]
+        for l in montar_tabela_txt(
+            cab,
+            linhas_tabela,
+            alinhamento=["left"] + ["right"] * 3 + ["left"],
+        ):
+            linhas.append(l)
+        linhas.append("")
+
+        # A/B usam IM por dimensão da unidade
         dim_unid = (
             consolidacao_dimensao_unidade
             .loc[(consolidacao_dimensao_unidade["IFES"] == ifes) & (consolidacao_dimensao_unidade["Unidade"] == unidade)]
@@ -449,24 +525,24 @@ def gerar_relatorios_txt(
             .rename(columns={"Pontuação IM da Dimensão na ifes_unidade":"IM_dim_unidade"})
         )
 
-        # A) IM_dim_unidade < mediana(IFES, dimensao)
-        base_med_dim = mediana_dimensao_por_ifes.loc[mediana_dimensao_por_ifes["IFES"] == ifes][["Dimensão","Mediana_dim_IFES"]]
-        a_tbl = dim_unid.merge(base_med_dim, on="Dimensão", how="left")
-        a_bad = a_tbl.loc[a_tbl["IM_dim_unidade"] < a_tbl["Mediana_dim_IFES"]].sort_values("IM_dim_unidade")
-        linhas.append("A) Dimensões com IM da unidade < mediana das unidades da IFES")
+        # A) IM_dim_unidade < média(IFES, dimensão)
+        base_mean_dim = media_dimensao_por_ifes.loc[media_dimensao_por_ifes["IFES"] == ifes][["Dimensão","Media_dim_IFES"]]
+        a_tbl = dim_unid.merge(base_mean_dim, on="Dimensão", how="left")
+        a_bad = a_tbl.loc[a_tbl["IM_dim_unidade"] < a_tbl["Media_dim_IFES"]].sort_values("IM_dim_unidade")
+        linhas.append("A) Dimensões com IM da unidade < média das unidades da IFES")
         if a_bad.empty:
             linhas.append(" - (nenhuma)")
         else:
             for _, rr in a_bad.iterrows():
-                linhas.append(f" - {rr['Dimensão']}: {fmt_num(rr['IM_dim_unidade'])} (limiar {fmt_num(rr['Mediana_dim_IFES'])})")
+                linhas.append(f" - {rr['Dimensão']}: {fmt_num(rr['IM_dim_unidade'])} (limiar {fmt_num(rr['Media_dim_IFES'])})")
         linhas.append("")
 
-        # B) IM_dim_unidade < IM da dimensao na IFES (media)
-        base_mean_dim = (
+        # B) IM_dim_unidade < IM da dimensão na IFES (média) — já equivalente à A), mantido por clareza
+        base_mean_dim_ifes = (
             consolidacao_dimensao_ifes.loc[consolidacao_dimensao_ifes["IFES"] == ifes][["Dimensão","Pontuação IM da Dimensão na IFES"]]
             .rename(columns={"Pontuação IM da Dimensão na IFES":"Media_dim_IFES"})
         )
-        b_tbl = dim_unid.merge(base_mean_dim, on="Dimensão", how="left")
+        b_tbl = dim_unid.merge(base_mean_dim_ifes, on="Dimensão", how="left")
         b_bad = b_tbl.loc[b_tbl["IM_dim_unidade"] < b_tbl["Media_dim_IFES"]].sort_values("IM_dim_unidade")
         linhas.append("B) Dimensões com IM da unidade < IM da dimensão na IFES (média)")
         if b_bad.empty:
@@ -476,45 +552,47 @@ def gerar_relatorios_txt(
                 linhas.append(f" - {rr['Dimensão']}: {fmt_num(rr['IM_dim_unidade'])} (limiar {fmt_num(rr['Media_dim_IFES'])})")
         linhas.append("")
 
-        # C/D) Perguntas da unidade vs baseline da dimensao na IFES (respostas)
-        base_dim_ifes = base_dimensao_respostas.loc[base_dimensao_respostas["IFES"] == ifes][["Dimensão","dim_mediana","dim_q3"]]
-        perg_med_unid = (
+        # C/D) Perguntas da unidade vs baseline da dimensão na IFES (respostas) — média
+        base_dim_ifes = base_dimensao_respostas.loc[base_dimensao_respostas["IFES"] == ifes][["Dimensão","dim_media"]]
+        perg_mean_unid = (
             dados_validos
             .loc[(dados_validos["IFES"] == ifes) & (dados_validos["Unidade"] == unidade)]
             .groupby(["Dimensão","Pergunta"], dropna=False)["Fator"]
-            .median()
-            .reset_index(name="mediana_pergunta_unidade")
+            .mean()
+            .reset_index(name="media_pergunta_unidade")
         )
 
-        perg_med_unid = perg_med_unid.merge(base_dim_ifes, on="Dimensão", how="left")
+        perg_mean_unid = perg_mean_unid.merge(base_dim_ifes, on="Dimensão", how="left")
 
-        # C) mediana_unidade < mediana(IFES, dimensao)
-        linhas.append("C) Perguntas por dimensão com mediana da unidade < mediana das respostas da Dimensão na IFES")
-        c_bad = perg_med_unid.loc[perg_med_unid["mediana_pergunta_unidade"] < perg_med_unid["dim_mediana"]]
+        # C) média_unidade < média(IFES, dimensão)
+        linhas.append("C) Perguntas por dimensão com média da unidade < média das respostas da Dimensão na IFES")
+        c_bad = perg_mean_unid.loc[perg_mean_unid["media_pergunta_unidade"] < perg_mean_unid["dim_media"]]
         if c_bad.empty:
             linhas.append(" - (nenhuma)")
         else:
             for dimensao, df_dim in c_bad.groupby("Dimensão", dropna=False):
                 linhas.append(f" - {dimensao}:")
-                for _, rr in df_dim.sort_values("mediana_pergunta_unidade").iterrows():
-                    linhas.append(f"    • {rr['Pergunta']} = {fmt_num(rr['mediana_pergunta_unidade'])} (limiar {fmt_num(rr['dim_mediana'])})")
+                for _, rr in df_dim.sort_values("media_pergunta_unidade").iterrows():
+                    linhas.append(f"    • {rr['Pergunta']} = {fmt_num(rr['media_pergunta_unidade'])} (limiar {fmt_num(rr['dim_media'])})")
         linhas.append("")
 
-        # D) mediana_unidade >= Q3(IFES, dimensao)
-        linhas.append('D) "Perguntas Referência": perguntas com mediana da unidade >= Q3 das respostas da Dimensão na IFES')
-        d_good = perg_med_unid.loc[perg_med_unid["mediana_pergunta_unidade"] >= perg_med_unid["dim_q3"]]
+        # D) média_unidade >= média(IFES, dimensão)
+        linhas.append('D) "Perguntas Referência": perguntas com média da unidade >= média das respostas da Dimensão na IFES')
+        d_good = perg_mean_unid.loc[perg_mean_unid["media_pergunta_unidade"] >= perg_mean_unid["dim_media"]]
         if d_good.empty:
             linhas.append(" - (nenhuma)")
         else:
             for dimensao, df_dim in d_good.groupby("Dimensão", dropna=False):
                 linhas.append(f" - {dimensao}:")
-                for _, rr in df_dim.sort_values("mediana_pergunta_unidade", ascending=False).iterrows():
-                    linhas.append(f"    • {rr['Pergunta']} = {fmt_num(rr['mediana_pergunta_unidade'])} (limiar {fmt_num(rr['dim_q3'])})")
+                for _, rr in df_dim.sort_values("media_pergunta_unidade", ascending=False).iterrows():
+                    linhas.append(f"    • {rr['Pergunta']} = {fmt_num(rr['media_pergunta_unidade'])} (limiar {fmt_num(rr['dim_media'])})")
         linhas.append("")
 
-        escrever_txt(dir_unidades / f"IFES_{ifes_slug}__UNIDADE_{unid_slug}.txt", linhas)
+        ifes_unidades_dir = dir_unidades / f"IFES_{ifes_slug}__UNIDADE_{unid_slug}.txt"
+        escrever_txt(ifes_unidades_dir, linhas)
 
     print(f"[OK] Relatórios TXT gerados em: {dir_base}")
+
 
 
 # ======================= PIPELINE PRINCIPAL =======================
@@ -567,6 +645,13 @@ def executar(caminho_questionario: Path,
     dados_longos["IFES"] = dados_longos.get(pergunta_ifes, np.nan).astype(str).str.strip()
     dados_longos["Unidade"] = dados_longos.get(pergunta_unidade, np.nan).astype(str).str.strip()
 
+    # ifes_unidade (precisa existir antes dos agrupamentos)
+    dados_longos["ifes_unidade"] = (
+        dados_longos["IFES"].fillna("").astype(str).str.strip()
+        + " - " +
+        dados_longos["Unidade"].fillna("").astype(str).str.strip()
+    )
+
     # RespostaID estavel
     mapa_ids = r_df[["RespostaIndex"] + colunas_meta].drop_duplicates().copy()
     mapa_ids["RespostaID"] = mapa_ids.apply(lambda linha: gerar_id_resposta(linha, pergunta_ifes, pergunta_unidade), axis=1)
@@ -584,7 +669,7 @@ def executar(caminho_questionario: Path,
     dados_longos["Valida"] = interpretado.apply(lambda x: x[1])
 
     # Peso por dimensao (1/n_validas) por resposta/unidade
-    chaves_grp = ["IFES", "Unidade", "Dimensão", "RespostaID"]
+    chaves_grp = ["IFES", "Unidade", "ifes_unidade", "Dimensão", "RespostaID"]
     n_validas = (
         dados_longos.assign(validas=dados_longos["Valida"].astype(int))
         .groupby(chaves_grp)["validas"].sum().rename("n_validas").reset_index()
@@ -598,9 +683,6 @@ def executar(caminho_questionario: Path,
     )
     dados_longos["Pontuação da pergunta"] = dados_longos["Fator"] * dados_longos["Peso"]
 
-    # ifes_unidade
-    dados_longos["ifes_unidade"] = dados_longos["IFES"].fillna("").astype(str).str.strip() + " - " + \
-                                   dados_longos["Unidade"].fillna("").astype(str).str.strip()
 
     # ------------------- Consolidações -------------------
     # Dimensao na unidade (media das respostas ponderadas por RespostaID)
