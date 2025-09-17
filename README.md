@@ -1,5 +1,5 @@
 # IM-IFES
-Gera um Excel consolidado (4 abas) a partir de:
+Gera um Excel consolidado a partir de:
 - questionario.xlsx (estrutura: ID | Pergunta | Dimensão)
 - respostas.xlsx (respostas brutas do Google Forms)
 
@@ -17,8 +17,28 @@ Regras implementadas:
     - 0.60–0.79 Implementado, porém otimizável
     - 0.80–1.00 Excelência
 
+Recursos:
+- Aceita arquivos .xlsx/.xls/.csv/.txt (questionário e respostas).
+- Calcula IM por dimensão na unidade, por dimensão na IFES e IM da IFES (média do IM das dimensões).
+- Exporta "dados agregados" para Excel.
+- Gera relatórios TXT por IFES e por ifes_unidade contendo:
+  (IFES)   A) Estatísticas por dimensão (Min, Q1, Mediana, Q3, Máximo, Desv.Pad., Média, IQR)
+           B) Unidades com IM < mediana da IFES
+           C) "Unidades Referência": IM >= Q3 da IFES
+           D) Perguntas com mediana < mediana das respostas da dimensão (na IFES)
+           E) "Perguntas Referência": mediana >= Q3 das respostas da dimensão (na IFES)
+  (UNID)   A) Dimensões com IM da unidade < mediana(IFES, dimensão)
+           B) Dimensões com IM da unidade < IM da dimensão na IFES (média)
+           C) Perguntas da unidade com mediana < mediana das respostas da dimensão (na IFES)
+           D) "Perguntas Referência" da unidade: mediana >= Q3 das respostas da dimensão (na IFES)
+Observações nos TXT:
+- "Abaixo da mediana" usa comparação estrita: < mediana
+- "Acima do Q3" inclui empates: >= Q3
+- Desvio-padrão amostral (ddof=1)
+- No início de CADA TXT é exibido o IM (média do IM das dimensões).
+
 Saída:
-- Excel com 5 abas: dados, consolidacao_dimensao_unidade, consolidacao_dimensao_ifes, consolidacao_ifes, dados agregados
+- Excel com dados agregados
 
 Uso (exemplos)
     python im_calc.py \
@@ -27,5 +47,3 @@ Uso (exemplos)
         --saida /caminho/im_resultado.xlsx \
         --ifes-col "Informe a sua Instituição Federal de Ensino Superior" \
         --unidade-col "Informe unidade que você está representando"
-
-Requer: pandas, numpy, xlsxwriter
