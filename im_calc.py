@@ -631,8 +631,37 @@ def gerar_relatorios_em_texto(
                     f"(IM IFES {formatar_numero(indice_medio_da_instituicao)})"
                 )
         linhas_relatorio.append("")
+                # 7) Dimensões da unidade com IM menor que o IM da dimensão da IFES
+        linhas_relatorio.append("7) Dimensões da unidade com IM menor que o IM da dimensão da IFES")
+        subconjunto_dim_menor_que_dim_ifes = tabela_dimensao_comparativa.loc[
+            tabela_dimensao_comparativa["IM_dimensao_unidade"] < tabela_dimensao_comparativa["IM_dimensao_IFES"]
+        ]
+        if subconjunto_dim_menor_que_dim_ifes.empty:
+            linhas_relatorio.append(" - (nenhuma)")
+        else:
+            for _, linha in subconjunto_dim_menor_que_dim_ifes.sort_values("Delta_para_IM_da_IFES").iterrows():
+                linhas_relatorio.append(
+                    f" - {linha['Dimensão']}: {formatar_numero(linha['IM_dimensao_unidade'])} "
+                    f"(IM dim IFES {formatar_numero(linha['IM_dimensao_IFES'])})"
+                )
+        linhas_relatorio.append("")
 
-        # 7 e 8) Perguntas na unidade vs IM da respectiva dimensão na UNIDADE
+        # 8) Dimensões da unidade com IM maior que o IM da dimensão da IFES
+        linhas_relatorio.append("8) Dimensões da unidade com IM maior que o IM da dimensão da IFES")
+        subconjunto_dim_maior_que_dim_ifes = tabela_dimensao_comparativa.loc[
+            tabela_dimensao_comparativa["IM_dimensao_unidade"] > tabela_dimensao_comparativa["IM_dimensao_IFES"]
+        ]
+        if subconjunto_dim_maior_que_dim_ifes.empty:
+            linhas_relatorio.append(" - (nenhuma)")
+        else:
+            for _, linha in subconjunto_dim_maior_que_dim_ifes.sort_values("Delta_para_IM_da_IFES", ascending=False).iterrows():
+                linhas_relatorio.append(
+                    f" - {linha['Dimensão']}: {formatar_numero(linha['IM_dimensao_unidade'])} "
+                    f"(IM dim IFES {formatar_numero(linha['IM_dimensao_IFES'])})"
+                )
+        linhas_relatorio.append("")
+
+        # 9 e 10) Perguntas na unidade vs IM da respectiva dimensão na UNIDADE
         base_dimensao_indice_unidade = tabela_dimensao_comparativa[["Dimensão", "IM_dimensao_unidade"]].rename(
             columns={"IM_dimensao_unidade": "IM_dimensao_unidade_valor"}
         )
@@ -647,8 +676,8 @@ def gerar_relatorios_em_texto(
             .merge(base_dimensao_indice_unidade, on="Dimensão", how="left")
         )
 
-        # 7) abaixo
-        linhas_relatorio.append("7) Perguntas cuja média do fator ficou abaixo do IM da respectiva dimensão na IFES_UNIDADE")
+        # 9) abaixo
+        linhas_relatorio.append("9) Perguntas cuja média do fator ficou abaixo do IM da respectiva dimensão na IFES_UNIDADE")
         subconjunto_perguntas_abaixo_unidade = tabela_media_pergunta_na_unidade.loc[
             tabela_media_pergunta_na_unidade["media_da_pergunta_na_unidade"] < tabela_media_pergunta_na_unidade["IM_dimensao_unidade_valor"]
         ]
@@ -664,8 +693,8 @@ def gerar_relatorios_em_texto(
                     )
         linhas_relatorio.append("")
 
-        # 8) acima
-        linhas_relatorio.append("8) Perguntas cuja média do fator ficou acima do IM da respectiva dimensão na IFES_UNIDADE")
+        # 10) acima
+        linhas_relatorio.append("10) Perguntas cuja média do fator ficou acima do IM da respectiva dimensão na IFES_UNIDADE")
         subconjunto_perguntas_acima_unidade = tabela_media_pergunta_na_unidade.loc[
             tabela_media_pergunta_na_unidade["media_da_pergunta_na_unidade"] > tabela_media_pergunta_na_unidade["IM_dimensao_unidade_valor"]
         ]
