@@ -513,9 +513,16 @@ def gerar_relatorios_em_texto(
         ]
         indice_medio_da_instituicao = float(linha_instituicao["Pontuação IM na IFES"].iloc[0]) if len(linha_instituicao) else np.nan
 
+        indice_medio_da_unidade = float(linha_unidade["IM da ifes_unidade"]) if pd.notna(linha_unidade["IM da ifes_unidade"]) else np.nan
+        classificacao_da_unidade = classificar_nivel_de_maturidade(indice_medio_da_unidade)
+        classificacao_txt = classificacao_da_unidade if pd.notna(classificacao_da_unidade) else "—"
+
+
         linhas_relatorio = []
-        linhas_relatorio.append(f"Relatório IM – Unidade: {rotulo_instituicao_unidade}")
-        linhas_relatorio.append(f"1) IM da unidade (média das dimensões): {formatar_numero(indice_medio_da_unidade)}")
+        linhas_relatorio.append(f"Relatório IM – Unidade: {rotulo_instituicao_unidade}") 
+        linhas_relatorio.append(
+            f"1) IM da unidade (média das dimensões): {formatar_numero(indice_medio_da_unidade)} — {classificacao_txt}"
+        )
         linhas_relatorio.append("Obs.: Desvio-padrão amostral (ddof=1).")
         linhas_relatorio.append("")
 
